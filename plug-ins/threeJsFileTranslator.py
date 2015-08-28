@@ -21,31 +21,19 @@ FLOAT_PRECISION = 8
 class ThreeJsWriter(object):
     def __init__(self):
         self.componentKeys = ['vertices', 'normals', 'colors', 'uvs', 'faces',
-                'materials', 'diffuseMaps', 'specularMaps', 'bumpMaps', 'copyTextures',
+                'materials', 'diffuseMaps', 'specularMaps', 'glossMaps', 'bumpMaps',
+                'incandescenceMasks', 'copyTextures',
                 'bones', 'skeletalAnim', 'bakeAnimations', 'prettyOutput']
 
     def write(self, path, optionString, accessMode):
         self.path = path
         self._parseOptions(optionString)
 
-        self.verticeOffset = 0
-        self.uvOffset = 0
-        self.normalOffset = 0
-        self.vertices = []
+        self.meshes = []
         self.materials = []
-        self.faces = []
-        self.normals = []
-        self.uvs = []
-        self.morphTargets = []
         self.bones = []
         self.animations = []
-        self.skinIndices = []
-        self.skinWeights = []
 
-        if self.options["bakeAnimations"]:
-            print("exporting animations")
-            self._exportAnimations()
-            self._goToFrame(self.options["startFrame"])
         if self.options["materials"]:
             print("exporting materials")
             self._exportMaterials()
@@ -54,8 +42,6 @@ class ThreeJsWriter(object):
             select(map(lambda m: m.getParent(), ls(type='mesh')))
             runtime.GoToBindPose()
             self._exportBones()
-            print("exporting skins")
-            self._exportSkins()
         print("exporting meshes")
         self._exportMeshes()
         if self.options["skeletalAnim"]:
@@ -64,25 +50,12 @@ class ThreeJsWriter(object):
 
         print("writing file")
         output = {
-            'metadata': {
-                'formatVersion': 3.1,
-                'generatedBy': 'Maya Exporter'
-            },
-
-            'vertices': self.vertices,
-            'uvs': [self.uvs],
-            'faces': self.faces,
-            'normals': self.normals,
+            'meshes': self.meshes,
             'materials': self.materials,
         }
 
-        if self.options['bakeAnimations']:
-            output['morphTargets'] = self.morphTargets
-
         if self.options['bones']:
             output['bones'] = self.bones
-            output['skinIndices'] = self.skinIndices
-            output['skinWeights'] = self.skinWeights
             output['influencesPerVertex'] = self.options["influencesPerVertex"]
 
         if self.options['skeletalAnim']:
@@ -117,25 +90,28 @@ class ThreeJsWriter(object):
             self.options["stepFrame"] = int(bakeAnimOptions[3])
 
     def _exportMeshes(self):
-        if self.options['vertices']:
-            self._exportVertices()
-        for mesh in self._allMeshes():
-            self._exportMesh(mesh)
+        for mesh in self._meshesWithSkins():
+            output = {}
+            self._exportMesh(mesh, output)
+            self.meshes.append(output)
 
-    def _exportMesh(self, mesh):
+    def _exportMesh(self, mesh, output):
         print("Exporting " + mesh.name())
+        if self.options['vertices']:
+            print("Exporting vertices")
+            self._exportVertices(mesh, output)
         if self.options['faces']:
             print("Exporting faces")
-            self._exportFaces(mesh)
-            self.verticeOffset += len(mesh.getPoints())
-            self.uvOffset += mesh.numUVs()
-            self.normalOffset += mesh.numNormals()
+            self._exportFaces(mesh, output)
         if self.options['normals']:
             print("Exporting normals")
-            self._exportNormals(mesh)
+            self._exportNormals(mesh, output)
         if self.options['uvs']:
             print("Exporting UVs")
-            self._exportUVs(mesh)
+            self._exportUVs(mesh, output)
+        if self.options['bones']:
+            print("Exporting Skins")
+            self._exportSkins(mesh, output)
 
     def _getMaterialIndex(self, face, mesh):
         if not hasattr(self, '_materialIndices'):
@@ -150,51 +126,40 @@ class ThreeJsWriter(object):
         return -1
 
 
-    def _exportVertices(self):
-        self.vertices += self._getVertices()
+    def _exportVertices(self, mesh, output):
+        output['vertices'] = self._getVertices(mesh)
 
-    def _exportAnimations(self):
-        for frame in self._framesToExport():
-            self._exportAnimationForFrame(frame)
-
-    def _framesToExport(self):
-        return range(self.options["startFrame"], self.options["endFrame"], self.options["stepFrame"])
-
-    def _exportAnimationForFrame(self, frame):
-        print("exporting frame " + str(frame))
-        self._goToFrame(frame)
-        self.morphTargets.append({
-            'name': "frame_" + str(frame),
-            'vertices': self._getVertices()
-        })
-
-    def _getVertices(self):
-        return [coord for mesh in self._allMeshes() for point in mesh.getPoints(space='world') for coord in [round(point.x, FLOAT_PRECISION), round(point.y, FLOAT_PRECISION), round(point.z, FLOAT_PRECISION)]]
+    def _getVertices(self, mesh):
+        return [coord for point in mesh.getPoints(space='world') for coord in [round(point.x, FLOAT_PRECISION), round(point.y, FLOAT_PRECISION), round(point.z, FLOAT_PRECISION)]]
 
     def _goToFrame(self, frame):
         currentTime(frame)
 
-    def _exportFaces(self, mesh):
+    def _exportFaces(self, mesh, output):
         typeBitmask = self._getTypeBitmask()
+        output['faces'] = []
 
         for face in mesh.faces:
             materialIndex = self._getMaterialIndex(face, mesh)
             hasMaterial = materialIndex != -1
-            self._exportFaceBitmask(face, typeBitmask, hasMaterial=hasMaterial)
-            self.faces += map(lambda x: x + self.verticeOffset, face.getVertices())
+            self._exportFaceBitmask(face, typeBitmask, output, hasMaterial=hasMaterial)
+            output['faces'] += face.getVertices()
             if self.options['materials']:
                 if hasMaterial:
-                    self.faces.append(materialIndex)
+                    output['faces'].append(materialIndex)
             if self.options['uvs'] and face.hasUVs():
-                self.faces += map(lambda v: face.getUVIndex(v) + self.uvOffset, range(face.polygonVertexCount()))
+                output['faces'] += map(lambda v: face.getUVIndex(v), range(face.polygonVertexCount()))
             if self.options['normals']:
-                self._exportFaceVertexNormals(face)
+                for i in range(face.polygonVertexCount()):
+                    output['faces'].append(face.normalIndex(i))
 
-    def _exportFaceBitmask(self, face, typeBitmask, hasMaterial=True):
+    def _exportFaceBitmask(self, face, typeBitmask, output, hasMaterial=True):
         if face.polygonVertexCount() == 4:
             faceBitmask = 1
-        else:
+        elif face.polygonVertexCount() == 3:
             faceBitmask = 0
+        else:
+            raise Exception("Invalid polygon vertex count " + str(face.polygonVertexCount()))
 
         if hasMaterial:
             faceBitmask |= (1 << 1)
@@ -202,21 +167,25 @@ class ThreeJsWriter(object):
         if self.options['uvs'] and face.hasUVs():
             faceBitmask |= (1 << 3)
 
-        self.faces.append(typeBitmask | faceBitmask)
+        output['faces'].append(typeBitmask | faceBitmask)
 
-    def _exportFaceVertexNormals(self, face):
-        for i in range(face.polygonVertexCount()):
-            self.faces.append(face.normalIndex(i) + self.normalOffset)
-
-    def _exportNormals(self, mesh):
+    def _exportNormals(self, mesh, output):
+        output['normals'] = []
+        output['tangents'] = []
+        output['binormals'] = []
         for normal in mesh.getNormals():
-            self.normals += [round(normal.x, FLOAT_PRECISION), round(normal.y, FLOAT_PRECISION), round(normal.z, FLOAT_PRECISION)]
+            output['normals'] += [round(normal.x, FLOAT_PRECISION), round(normal.y, FLOAT_PRECISION), round(normal.z, FLOAT_PRECISION)]
+        for binormal in mesh.getBinormals():
+            output['binormals'] += [round(binormal.x, FLOAT_PRECISION), round(binormal.y, FLOAT_PRECISION), round(binormal.z, FLOAT_PRECISION)]
+        for tangent in mesh.getTangents():
+            output['tangents'] += [round(tangent.x, FLOAT_PRECISION), round(tangent.y, FLOAT_PRECISION), round(tangent.z, FLOAT_PRECISION)]
 
-    def _exportUVs(self, mesh):
+    def _exportUVs(self, mesh, output):
+        output['uvs'] = []
         us, vs = mesh.getUVs()
         for i, u in enumerate(us):
-            self.uvs.append(u)
-            self.uvs.append(vs[i])
+            output['uvs'].append(u)
+            output['uvs'].append(vs[i])
 
     def _getTypeBitmask(self):
         bitmask = 0
@@ -244,12 +213,16 @@ class ThreeJsWriter(object):
         if isinstance(mat, nodetypes.Phong):
             result["colorSpecular"] = mat.getSpecularColor().rgb
             result["specularCoef"] = mat.getCosPower()
-            if self.options["specularMaps"]:
-                self._exportSpecularMap(result, mat)
+        if mat.hasAttr("specularColor") and self.options["specularMaps"]:
+            self._exportSpecularMap(result, mat)
+        if mat.hasAttr("eccentricity") and self.options["glossMaps"]:
+            self._exportGlossMap(result, mat)
         if self.options["bumpMaps"]:
             self._exportBumpMap(result, mat)
         if self.options["diffuseMaps"]:
             self._exportDiffuseMap(result, mat)
+        if self.options["incandescenceMasks"]:
+            self._exportIncandescenceMasks(result, mat)
 
         return result
 
@@ -266,8 +239,19 @@ class ThreeJsWriter(object):
 
     def _exportSpecularMap(self, result, mat):
         for f in mat.attr('specularColor').inputs():
-            result["colorSpecular"] = f.attr('defaultColor').get()
+            if f.hasAttr("defaultColor"):
+                result["colorSpecular"] = f.attr('defaultColor').get()
             self._exportFile(result, f, "Specular")
+
+    def _exportGlossMap(self, result, mat):
+        for f in mat.attr("eccentricity").inputs():
+            self._exportFile(result, f, "Gloss")
+
+    def _exportIncandescenceMasks(self, result, mat):
+        if mat.hasAttr("incandescence"):
+            result["colorIncandescence"] = mat.getAttr("incandescence")
+            for f in mat.attr("incandescence").inputs():
+                self._exportFile(result, f, "Incandescence")
 
     def _exportFile(self, result, mapFile, mapType):
         src = mapFile.ftn.get()
@@ -276,6 +260,7 @@ class ThreeJsWriter(object):
         if self.options['copyTextures']:
             shutil.copy2(src, os.path.join(targetDir, fName))
         result["map" + mapType] = fName
+        result["map" + mapType + "ColorGain"] = mapFile.getAttr("colorGain")
         result["map" + mapType + "Repeat"] = [1, 1]
         result["map" + mapType + "Wrap"] = ["repeat", "repeat"]
         result["map" + mapType + "Anistropy"] = 4
@@ -353,34 +338,42 @@ class ThreeJsWriter(object):
     def _roundQuat(self, rot):
         return map(lambda x: round(x, FLOAT_PRECISION), [rot.x, rot.y, rot.z, rot.w])
 
-    def _exportSkins(self):
-        for mesh in self._allMeshes():
-            print("exporting skins for mesh: " + mesh.name())
-            skins = filter(lambda skin: mesh in skin.getOutputGeometry(), ls(type='skinCluster'))
-            if len(skins) > 0:
-                print("mesh has " + str(len(skins)) + " skins")
-                skin = skins[0]
-                joints = skin.influenceObjects()
-                for weights in skin.getWeights(mesh.vtx):
-                    numWeights = 0
+    def _exportSkins(self, mesh, output):
+        output['skinWeights'] = []
+        output['skinIndices'] = []
+        skins = filter(lambda skin: mesh in skin.getOutputGeometry(), self._allSkins())
+        if len(skins) > 0:
+            print("mesh has " + str(len(skins)) + " skins")
+            skin = skins[0]
+            joints = skin.influenceObjects()
+            for weights in skin.getWeights(mesh.vtx):
+                numWeights = 0
 
-                    for i in range(0, len(weights)):
-                        if weights[i] > 0:
-                            self.skinWeights.append(weights[i])
-                            self.skinIndices.append(self._indexOfJoint(joints[i].name()))
-                            numWeights += 1
+                for i in range(0, len(weights)):
+                    if weights[i] > 0:
+                        output['skinWeights'].append(weights[i])
+                        output['skinIndices'].append(self._indexOfJoint(joints[i].name()))
+                        numWeights += 1
 
-                    if numWeights > self.options["influencesPerVertex"]:
-                        raise Exception("More than " + str(self.options["influencesPerVertex"]) + " influences on a vertex in " + mesh.name() + ".")
+                if numWeights > self.options["influencesPerVertex"]:
+                    raise Exception("More than " + str(self.options["influencesPerVertex"]) + " influences on a vertex in " + mesh.name() + ".")
 
-                    for i in range(0, self.options["influencesPerVertex"] - numWeights):
-                        self.skinWeights.append(0)
-                        self.skinIndices.append(0)
-            else:
-                print("mesh has no skins, appending 0")
-                for i in range(0, len(mesh.getPoints()) * self.options["influencesPerVertex"]):
-                    self.skinWeights.append(0)
-                    self.skinIndices.append(0)
+                for i in range(0, self.options["influencesPerVertex"] - numWeights):
+                    output['skinWeights'].append(0)
+                    output['skinIndices'].append(0)
+
+    def _meshesWithSkins(self):
+        return [mesh for mesh in self._allMeshes() if self._hasSkin(mesh)]
+
+    def _hasSkin(self, mesh):
+        skins = filter(lambda skin: mesh in skin.getOutputGeometry(), self._allSkins())
+        return len(skins) > 0
+
+    def _allSkins(self):
+        if not hasattr(self, '__allSkins'):
+            self.__allSkins = ls(type='skinCluster')
+        return self.__allSkins
+
 
 class NullAnimCurve(object):
     def getValue(self, index):

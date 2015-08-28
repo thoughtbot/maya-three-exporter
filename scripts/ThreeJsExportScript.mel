@@ -31,7 +31,9 @@ global proc int ThreeJsExportScript(string $parent, string $action, string $sett
               checkBox -v true -l "Material Indices" materialsCb;
               checkBox -v true -l "Diffuse Maps" diffuseMapsCb;
               checkBox -v true -l "Specular Maps" specularMapsCb;
+              checkBox -v true -l "Gloss Maps" glossMapsCb;
               checkBox -v true -l "Bump Maps" bumpMapsCb;
+              checkBox -v true -l "Incandescence Masks" incandescenceCb;
               checkBox -v true -l "Copy Texture Files to Target Directory" copyTexturesCb;
               setParent ..; // columnLayout
             setParent ..; // frameLayout
@@ -39,12 +41,6 @@ global proc int ThreeJsExportScript(string $parent, string $action, string $sett
           frameLayout -cll true -cl false -bv true -bs "etchedIn" -l "Animation Options";
             columnLayout -adj true;
               checkBox -v true -l "Export Animations" animCb;
-              checkBox
-                -v false
-                -l "Bake Animation"
-                -onc "textField -e -en true startText; textField -e -en true endText; textField -e -en true stepText;"
-                -ofc "textField -e -en false startText; textField -e -en false endText; textField -e -en false stepText;"
-                bakeAnimCb;
               textField -en false -tx `playbackOptions -minTime true -q` -ann "Start" startText;
               textField -en false -tx `playbackOptions -maxTime true -q` -ann "End" endText;
               textField -en false -tx 1 -ann "Step" stepText;
@@ -75,8 +71,12 @@ global proc int ThreeJsExportScript(string $parent, string $action, string $sett
             $option += "diffuseMaps ";
         if (`checkBox -q -v specularMapsCb`)
             $option += "specularMaps ";
+        if (`checkBox -q -v glossMapsCb`)
+            $option += "glossMaps ";
         if (`checkBox -q -v bumpMapsCb`)
             $option += "bumpMaps ";
+        if (`checkBox -q -v incandescenceCb`)
+            $option += "incandescenceMasks ";
         if (`checkBox -q -v copyTexturesCb`)
             $option += "copyTexturesMaps ";
         if (`checkBox -q -v colorsCb`)
@@ -89,16 +89,6 @@ global proc int ThreeJsExportScript(string $parent, string $action, string $sett
         }
         if (`checkBox -q -v animCb`)
             $option += "skeletalAnim ";
-        if (`checkBox -q -v bakeAnimCb`)
-        {
-            $option += "bakeAnimations ";
-            $option += `textField -q -tx startText`;
-            $option += " ";
-            $option += `textField -q -tx endText`;
-            $option += " ";
-            $option += `textField -q -tx stepText`;
-            $option += " ";
-        }
         if (`checkBox -q -v prettyOutputCb`)
             $option += "prettyOutput ";
         $option += "\"";

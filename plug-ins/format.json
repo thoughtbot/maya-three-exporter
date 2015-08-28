@@ -1,0 +1,45 @@
+{
+  meshes: [
+    faces: {
+      // indexed by material
+      "0": {
+        quads: [1, 2, 3, 4],
+        triangles: [1, 2, 3]
+      }
+    }
+    materials: [
+      {
+        // same as three
+      }
+    ]
+    vertices: [1.0, 0.5, 0.0, 2.0, 1.0, 0.0],
+    normals: [1.0, 0.5, 0.0, 2.0, 1.0, 0.0],
+    uvs: [0.0, 1.0],
+    skinWeights: [0.0, 0.0, 1.0, 0.0],
+    skinIndices: [0, 1, 2, 3, 4, 5]
+  ],
+
+  joints: [
+    {
+      // same as three
+    }
+  ],
+
+  animations: [
+    {
+      "name": "foo",
+      "length": 1.24,
+      "timeline": [
+        // same indexes as joints
+        [
+          {
+            "time": 0.0,
+            "rotation": [/*...*/],
+            "translation": [/*...*/],
+            "scale": [/*...*/]
+          }
+        ]
+      ]
+    }
+  ]
+}
